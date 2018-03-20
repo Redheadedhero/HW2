@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>three.js webgl - blender -json</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<style>
+			body {
+				background:#777;
+				padding:0;
+				margin:0;
+				overflow:hidden;
+			}
+
+			#info {
+				position: absolute;
+				top: 0px;
+				width: 100%;
+				color: #ffffff;
+			}
+
+		</style>
+	</head>
+	<body>
+
+		<div id="container"></div>
+
+		<script src="js/three.js"></script>
+		<script src="js/OBJLoader.js"></script>
+		 <script src="js/OrbitControls.js"></script>
+		
+
+  <script id="skyboxVS" type="x-shader/x-vertex">
+
+	uniform mat4 modelMatrix;
+	uniform mat4 viewMatrix;
+      	uniform mat4 projectionMatrix;
+
+     	attribute vec3 position; 
+
+	varying vec3 vWorldPosition;
+	
+	void main() {
+
+		vec4 worldPosition = modelMatrix * vec4( position, 1.0 );
+		vWorldPosition = worldPosition.xyz;
+
+		vec4 p = viewMatrix * modelMatrix * vec4(position, 1.0);
+		gl_Position = projectionMatrix * p;
+		
+     	 }
+
+    </script>
+
+    <script id="skyboxFS" type="x-shader/x-fragment">
+
+		precision mediump float;
+		
+		uniform samplerCube tCube;
+		varying vec3 vWorldPosition;
+
+		void main() {
+
+			gl_FragColor = textureCube( tCube, vec3(  vWorldPosition ) );
+		}
+	
+    </script>
+
+
+    <script id="reflectionMapVS" type="x-shader/x-vertex">
+
+	uniform mat4 modelMatrix;
+	uniform mat4 viewMatrix;
+      	uniform mat4 projectionMatrix;
+
+	uniform vec3 cameraPosition;
+	
+     	attribute vec3 position; 
+     	attribute vec3 normal; 
+
+	varying vec3 vI;
+	varying vec3 vWorldNormal;
+
+	void main() {
+  		vec4 mvPosition = viewMatrix * modelMatrix * vec4( position, 1.0 );
+  		vec4 worldPosition = modelMatrix * vec4( position, 1.0 );
+
+  		vWorldNormal = normalize( mat3( modelMatrix[0].xyz, modelMatrix[1].xyz, modelMatrix[2].xyz ) * normal );
+
+  		vI = worldPosition.xyz - cameraPosition;
+
+  		gl_Position = projectionMatrix * mvPosition;
+	}	
+  
+	</script>
+
+	 <script id="reflectionMapFS" type="x-shader/x-fragment">
+
+		precision mediump float;
+
+		uniform samplerCube envMap;
+
+		varying vec3 vI, vWorldNormal;
+
+		void main() {
+  			vec3 reflection = reflect( vI, vWorldNormal );
+  			vec4 envColor = textureCube( envMap, vec3( -reflection.x, reflection.yz ) );
+  			gl_FragColor = vec4(envColor);
+		}
+  
+	</script>
+
+	
+	 <script id="terrainMapVS" type="x-shader/x-vertex">
+
+	uniform mat4 modelMatrix;
+	uniform mat4 viewMatrix;
+      	uniform mat4 projectionMatrix;
+	uniform sampler2D tPic;
+
+     	attribute vec3 position;
+	attribute vec2 uv;
+	attribute vec3 normal;
+
+	uniform float displaceAmt; //controls the amount of vertex displacement...
+	
+      	varying float vDisplace; 
+	varying vec2 vUv;
+
+
+
+        precision mediump float;
+
+
+	void main() {
+       
+       		vUv = uv;
+		
+		vec4 clr = texture2D(tPic, uv);
+		vDisplace = clr.r * displaceAmt; //displacement;
+        	vec3 newPosition = (position.xyz + normal.xyz * vDisplace).xyz;
+      
+       		gl_Position = projectionMatrix  * viewMatrix * modelMatrix  * vec4( newPosition, 1.0 );
+        }
+
+	</script>
+	
+	<script id="terrainMapFS" type="x-shader/x-fragment">
+
+      precision mediump float;
+
+      uniform sampler2D tGrass, tSnow, tHill;
+
+
+      varying vec2 vUv;
+      varying float vDisplace; 
+
+
+      void main() {
+
+	vec4 grass = texture2D(tGrass, vUv);
+	vec4 snow = texture2D(tSnow, vUv);
+	vec4 hill = texture2D(tHill, vUv);
+
+	float zOffset = vDisplace;
+
+	vec4 mix1 = mix(grass, hill, min(1.0,zOffset*8.0));
+	vec4 mix2 = max(vec4(1.0), mix(hill, snow, zOffset) * 1.5);
+	vec4 mix3 = mix(mix1, mix2, zOffset);
+
+
+	gl_FragColor = vec4( mix3.rgb, 1.0 );        
+
+   }
+
+	</script>
+
+	
+  <script id="texVS" type="x-shader/x-vertex">
+
+	//Three.js gives us these automatically when a perspective camera is bound to the renderer
+	uniform mat4 modelMatrix;
+	uniform mat4 viewMatrix;
+      	uniform mat4 projectionMatrix;
+
+     	attribute vec3 position;
+	attribute vec2 uv;
+
+	varying vec2 vUV;
+
+	void main() {
+        	vec4 position = viewMatrix * modelMatrix * vec4(position, 1.0);
+	   	vUV = uv;
+        	gl_Position = projectionMatrix * position; 
+     	 }
+
+    </script>
+
+    <script id="texFS" type="x-shader/x-fragment">
+
+	precision mediump float;
+
+	uniform sampler2D tex;
+	varying vec2 vUV;
+
+      	void main() {
+
+		vec4 c = texture2D(tex, vUV);
+        	//gl_FragColor = vec4(vUV.xy, 0.0, 1.0);
+        	gl_FragColor = vec4(c.rgb, 1.0);
+	}
+
+	</script>
+
+
+
+	<script>
+
+		var sb_vs = document.getElementById( 'skyboxVS' ).textContent;
+      	var sb_fs = document.getElementById( 'skyboxFS' ).textContent;
+
+		var rm_vs = document.getElementById( 'reflectionMapVS' ).textContent;
+      	var rm_fs = document.getElementById( 'reflectionMapFS' ).textContent;
+		
+		var tex_vs = document.getElementById( 'texVS' ).textContent;
+      	var tex_fs = document.getElementById( 'texFS' ).textContent;
+
+		var t_vs = document.getElementById( 'terrainMapVS' ).textContent;
+		var t_fs = document.getElementById( 'terrainMapFS' ).textContent;
+		
+		var container;
+		var camera, scene, renderer;
+
+		var skyMesh, box;
+
+		var material3;
+		
+		var texture1;
+		var texture2 = new THREE.TextureLoader().load( 'Inkling.jpg' );
+		var texture3 = new THREE.TextureLoader().load( 'grass.png' );
+		var texture4 = new THREE.TextureLoader().load( 'snow.jpg' );
+		var texture5 = new THREE.TextureLoader().load( 'hill.jpg' );
+
+
+		init();
+		animate();
+
+
+
+		function init() {
+
+			container = document.getElementById( 'container' );
+
+
+			camera = new THREE.PerspectiveCamera( 50, window.innerWidth / window.innerHeight, 1, 2000 );
+			camera.position.set( 0, 0, 5 );
+			
+			var controls = new THREE.OrbitControls( camera );
+			camera.position.z = 5;
+			controls.update();
+
+			scene = new THREE.Scene();
+
+			//Sky cube map
+			var cubeMap = new THREE.CubeTextureLoader()
+				.setPath("./Skybox/")
+				.load( [
+					'SkyposX.jpg',
+					'SkynegX.jpg',
+					'SkyposY.jpg',
+					'SkynegY.jpg',
+					'SkyposZ.jpg',
+					'SkynegZ.jpg'
+				] );
+			
+			var skyUniforms = { "tCube": { type: "t", cubeValue: cubeMap } };
+			
+			var material = new THREE.RawShaderMaterial( {
+					uniforms: skyUniforms,
+					vertexShader: sb_vs,
+					fragmentShader: sb_fs
+				} );
+
+
+			material.depthWrite = false;
+      			material.side = THREE.BackSide;
+			
+
+			var geometry = new THREE.BoxGeometry( 2000, 2000, 2000 );
+
+			skyMesh = new THREE.Mesh( geometry, material );
+
+
+			scene.add( skyMesh );
+
+			
+		
+	var reflectionUniforms = {
+        	tCube: { type: "t", cubeValue: cubeMap },
+	};
+
+
+	var material2 = new THREE.RawShaderMaterial( {
+					uniforms: reflectionUniforms,
+					vertexShader: rm_vs,
+					fragmentShader: rm_fs
+	} );
+	
+	//Height Map
+	// geometry
+
+	var geometry1 = new THREE.PlaneGeometry( 5, 5, 300, 300 );
+
+	// material
+
+	var textureUniforms =  {
+		displaceAmt: { type: "f", value: 1.0 },
+		tPic: { type: "t", value: texture2  },
+		tGrass: { type: "t", value: texture3  },
+		tSnow: { type: "t", value: texture4  },
+		tHill: { type: "t", value: texture5  },
+	};
+	
+		material3 = new THREE.RawShaderMaterial( {
+
+		uniforms: textureUniforms,
+		vertexShader: t_vs,
+		fragmentShader: t_fs,
+
+	} );
+	
+	var mesh1 = new THREE.Mesh( geometry1, material3 );
+	mesh1.material.side = THREE.DoubleSide;
+	mesh1.rotateX(-Math.PI/3);
+	scene.add( mesh1 );
+
+
+	//Cube with reflective material
+	var gBox = new THREE.BoxGeometry( 1, 1, 1 );
+	box = new THREE.Mesh(gBox, material2);
+	box.position.x -= 1.0;
+	scene.add (box);
+
+
+
+	renderer = new THREE.WebGLRenderer();
+	renderer.setPixelRatio( window.devicePixelRatio );
+	renderer.setSize( window.innerWidth, window.innerHeight );
+	container.appendChild( renderer.domElement );
+
+	window.addEventListener( 'resize', onWindowResize, false );
+	document.addEventListener('mousemove', onDocumentMouseMove, false);
+
+}
+
+
+function onWindowResize( event ) {
+
+	renderer.setSize( window.innerWidth, window.innerHeight );
+
+	camera.aspect = window.innerWidth / window.innerHeight;
+	camera.updateProjectionMatrix();
+}
+
+
+function animate() {
+
+	requestAnimationFrame( animate );
+	render();
+}
+
+var mouseX = 0.5;
+var mouseY = 0.5;
+var prevMouseX = 0.5;
+var prevMouseY = 0.5;
+
+function render() {
+
+	//From height map
+	var time = performance.now();
+	var object0 = scene.children[ 0 ];
+	
+	//material3.textureUniforms.displaceAmt.value = 1.0;
+
+	if (mouseX < prevMouseX) {
+		camera.rotation.y += 0.03;
+	} else if (mouseX > prevMouseX) {
+		camera.rotation.y -= 0.03;
+	}
+
+	prevMouseX = mouseX;
+	prevMouseY = mouseY;
+
+	box.rotation.y += 0.001;
+	box.rotation.x -= 0.002;
+
+	renderer.render( scene, camera );
+}
+
+function onDocumentMouseMove(event) {
+	event.preventDefault();
+
+	mouseX = (event.clientX / window.innerWidth) ;
+	mouseY = -(event.clientY / window.innerHeight) ;
+
+}
+
+
+	</script>
+	</body>
+</html>
